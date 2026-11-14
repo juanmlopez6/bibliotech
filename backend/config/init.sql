@@ -66,7 +66,17 @@ CREATE TABLE users_roles (
 );
 
 /*
- * @brief 6. Tabla de Libros/Documentos (Relación 1:N con Usuarios)
+ * @brief 6. Tabla de Categorías Documentales (Normalización 1:N con Libros)
+ * @details Se separa la categoría en una entidad propia para evitar duplicación de texto,
+ * garantizar integridad referencial y permitir escalabilidad dinámica desde la API.
+ */
+CREATE TABLE categories (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(50) NOT NULL UNIQUE
+);
+
+/*
+ * @brief 7. Tabla de Libros/Documentos (Relación 1:N con Usuarios y Categorías)
  */
 CREATE TABLE books (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -74,15 +84,23 @@ CREATE TABLE books (
     filename VARCHAR(255) NOT NULL,
     title VARCHAR(100) NOT NULL,
     author VARCHAR(100) NOT NULL,
-    category VARCHAR(50),
+    category_id INT NOT NULL,
     pages INT DEFAULT 0,
     file_path VARCHAR(255) NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (category_id) REFERENCES categories(id)
 );
 
--- 7. Inserción de Roles Maestros
+-- 8. Inserción de Roles Maestros y Categorías Iniciales (Seed Data)
 INSERT INTO roles (name) VALUES ('admin'), ('client');
+
+INSERT INTO categories (id, name) VALUES
+    (1, 'Novela'),
+    (2, 'Ciencia Ficción'),
+    (3, 'Técnico / Académico'),
+    (4, 'Historia'),
+    (5, 'Poesía');
 
 /*
  * @brief 8. Datos Semilla (Seed Data) para desarrollo
@@ -168,26 +186,32 @@ END //
 
 /*
  * @brief Registra los metadatos de un archivo PDF subido al servidor.
+ * @param p_category_id Clave foránea de la categoría seleccionada.
  */
 CREATE PROCEDURE sp_create_book(
     IN p_user_id INT,
     IN p_filename VARCHAR(255),
     IN p_title VARCHAR(100),
     IN p_author VARCHAR(100),
-    IN p_category VARCHAR(50),
+    IN p_category_id INT,
     IN p_pages INT,
     IN p_file_path VARCHAR(255)
 )
 BEGIN
-    INSERT INTO books (user_id, filename, title, author, category, pages, file_path)
-    VALUES (p_user_id, p_filename, p_title, p_author, p_category, p_pages, p_file_path);
+    INSERT INTO books (user_id, filename, title, author, category_id, pages, file_path)
+    VALUES (p_user_id, p_filename, p_title, p_author, p_category_id, p_pages, p_file_path);
     SELECT LAST_INSERT_ID() as insertId;
 END //
 
--- Listar libros asociados a un usuario específico
+/*
+ * @brief Lista libros asociados a un usuario resolviendo el nombre de la categoría por JOIN.
+ */
 CREATE PROCEDURE sp_find_books_by_user(IN p_user_id INT)
 BEGIN
-    SELECT * FROM books WHERE user_id = p_user_id;
+    SELECT b.*, c.name AS category
+    FROM books b
+    JOIN categories c ON b.category_id = c.id
+    WHERE b.user_id = p_user_id;
 END //
 
 /*
@@ -197,7 +221,10 @@ END //
  */
 CREATE PROCEDURE sp_find_book_by_id(IN p_id INT, IN p_user_id INT)
 BEGIN
-    SELECT * FROM books WHERE id = p_id AND user_id = p_user_id;
+    SELECT b.*, c.name AS category
+    FROM books b
+    JOIN categories c ON b.category_id = c.id
+    WHERE b.id = p_id AND b.user_id = p_user_id;
 END //
 
 /*
@@ -208,5 +235,89 @@ BEGIN
     DELETE FROM books WHERE id = p_id AND user_id = p_user_id;
 END //
 
+/*
+ * @brief Actualiza los metadatos de un libro validando propiedad del usuario.
+ * @details Exige coincidencia de id y user_id para evitar modificaciones no autorizadas (IDOR)
+ * y actualiza la clave foránea category_id correspondiente a la tabla categories.
+ * @param p_book_id Identificador del libro a modificar.
+ * @param p_user_id Identificador del usuario autenticado.
+ * @param p_title Nuevo título del documento.
+ * @param p_author Nuevo autor del documento.
+ * @param p_pages Nueva cantidad de páginas.
+ * @param p_category_id Clave foránea de la categoría seleccionada.
+ */
+CREATE PROCEDURE sp_update_book_metadata(
+    IN p_book_id INT,
+    IN p_user_id INT,
+    IN p_title VARCHAR(100),
+    IN p_author VARCHAR(100),
+    IN p_pages INT,
+    IN p_category_id INT
+)
+BEGIN
+    UPDATE books
+    SET title = p_title,
+        author = p_author,
+        pages = p_pages,
+        category_id = p_category_id
+    WHERE id = p_book_id AND user_id = p_user_id;
+END //
+
+-- --- PROCEDIMIENTOS PARA CATEGORIES ---
+
+/*
+ * @brief Lista todas las categorías disponibles ordenadas por ID.
+ * @details Permite poblar dinámicamente los selectores del frontend sin hardcodear opciones.
+ */
+CREATE PROCEDURE sp_get_all_categories()
+BEGIN
+    SELECT id, name FROM categories ORDER BY id ASC;
+END //
+
 DELIMITER ;
 SET foreign_key_checks = 1;
+
+
+-- MÓDULO DE TRAZABILIDAD Y AUDITORÍA (ACCOUNTING) 
+
+/**
+ * @brief Tabla de registros de auditoría para análisis forense del sistema.
+ * @details Persiste las acciones críticas ejecutadas por clientes y administradores
+ *          evitando depender únicamente de trazas volátiles en consola.
+ */
+CREATE TABLE IF NOT EXISTS audit_logs
+(
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NULL,
+    action VARCHAR(100) NOT NULL,
+    target VARCHAR(255) NOT NULL,
+    ip_address VARCHAR(45) NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_audit_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+DELIMITER //
+
+/**
+ * @brief Procedimiento almacenado para insertar un nuevo evento de auditoría.
+ * @details Encapsula la inserción bajo el Principio de Menor Privilegio (PoLP)
+ *          y previene inyecciones SQL mediante parámetros tipados.
+ * @param p_user_id Identificador del usuario que ejecuta la acción.
+ * @param p_action Código de la acción realizada (ej. 'DELETE_BOOK', 'DELETE_USER').
+ * @param p_target Identificador o descripción del recurso afectado.
+ * @param p_ip_address Dirección IP desde donde se originó la petición.
+ */
+DROP PROCEDURE IF EXISTS sp_create_audit_log //
+CREATE PROCEDURE sp_create_audit_log
+(
+    IN p_user_id INT,
+    IN p_action VARCHAR(100),
+    IN p_target VARCHAR(255),
+    IN p_ip_address VARCHAR(45)
+)
+BEGIN
+    INSERT INTO audit_logs (user_id, action, target, ip_address)
+    VALUES (p_user_id, p_action, p_target, p_ip_address);
+END //
+
+DELIMITER ;

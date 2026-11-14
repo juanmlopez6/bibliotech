@@ -1,13 +1,59 @@
 /**
  * @file books_front_controller.js
- * @brief Controlador frontend para gestionar la carga, listado y lectura de documentos.
+ * @brief Controlador frontend para gestionar la carga, listado, lectura y actualización de documentos.
  * @project Bibliotech
  * @author Tecnologías Informáticas B - Facultad de Ingeniería - UNMdP
  * @license http://www.gnu.org/licenses/gpl.txt GNU GPL 3.0
  * @date Octubre 2026
  */
 
- document.addEventListener('DOMContentLoaded', loadBooks);
+ let availableCategories = [];
+
+ document.addEventListener('DOMContentLoaded', () =>
+ {
+     loadCategories();
+     loadBooks();
+ });
+
+ /**
+  * @brief Obtiene las categorías desde la API y puebla el selector del formulario.
+  * @details Se realiza de forma dinámica para evitar opciones hardcodeadas en HTML.
+  */
+ async function loadCategories()
+ {
+     try
+     {
+         availableCategories = await apiService.request('/categories', 'GET');
+         renderCategorySelect(availableCategories);
+     }
+     catch (error)
+     {
+         showModal('Error', 'No se pudieron cargar las categorías: ' + error.message);
+     }
+ }
+
+ /**
+  * @brief Construye las etiquetas <option> mediante DOM nativo (Zero-innerHTML).
+  * @param {Array<Object>} categories - Lista de categorías { id, name }.
+  */
+ function renderCategorySelect(categories)
+ {
+     const select = document.getElementById('category');
+     if (!select)
+     {
+         return;
+     }
+
+     select.replaceChildren();
+
+     categories.forEach(cat =>
+     {
+         const option = document.createElement('option');
+         option.value = cat.id;
+         option.textContent = cat.name;
+         select.appendChild(option);
+     });
+ }
 
  async function loadBooks() 
  {
@@ -68,6 +114,20 @@
          tdReading.appendChild(linkDownload);
  
          const tdActions = document.createElement('td');
+
+         // Botón de Editar Metadatos
+         const btnEdit = document.createElement('button');
+         btnEdit.className = 'w3-button w3-blue w3-tiny w3-round w3-margin-right';
+         btnEdit.textContent = 'Editar';
+         btnEdit.addEventListener('click', () => 
+         {
+             showEditMetadataModal(b, async (bookId, updatedData, modalElement) => 
+             {
+                 await updateBookMetadata(bookId, updatedData, modalElement);
+             }, availableCategories);
+         });
+         tdActions.appendChild(btnEdit);
+
          const btnDelete = document.createElement('button');
          btnDelete.className = 'w3-button w3-red w3-tiny w3-round';
          btnDelete.textContent = 'Borrar';
@@ -100,6 +160,21 @@
          showModal('Error', error.message);
      }
  }
+
+ async function updateBookMetadata(id, updatedData, modalElement) 
+ {
+     try 
+     {
+         await apiService.request(`/books/${id}`, 'PUT', updatedData);
+         modalElement.style.display = 'none';
+         showModal('Actualizado', 'Los metadatos del documento han sido modificados correctamente.');
+         loadBooks();
+     } 
+     catch (error) 
+     {
+         showModal('Error al actualizar', error.message);
+     }
+ }
  
  const uploadForm = document.getElementById('uploadForm');
  
@@ -123,7 +198,7 @@
         const formData = new FormData();
         formData.append('title', document.getElementById('title').value);
         formData.append('author', document.getElementById('author').value);
-        formData.append('category', document.getElementById('category').value);
+        formData.append('category_id', document.getElementById('category').value);
         formData.append('pages', document.getElementById('pages').value);
         
         // files[0] accede al binario crudo del archivo seleccionado en el input de tipo file
