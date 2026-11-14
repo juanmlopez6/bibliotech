@@ -7,7 +7,51 @@
  * @date Octubre 2026
  */
 
- document.addEventListener('DOMContentLoaded', loadBooks);
+ document.addEventListener('DOMContentLoaded', () =>
+ {
+     loadCategories();
+     loadBooks();
+ });
+
+ /**
+  * @brief Obtiene las categorías desde la API y puebla el selector del formulario.
+  * @details Se realiza de forma dinámica para evitar opciones hardcodeadas en HTML.
+  */
+ async function loadCategories()
+ {
+     try
+     {
+         const categories = await apiService.request('/categories', 'GET');
+         renderCategorySelect(categories);
+     }
+     catch (error)
+     {
+         showModal('Error', 'No se pudieron cargar las categorías: ' + error.message);
+     }
+ }
+
+ /**
+  * @brief Construye las etiquetas <option> mediante DOM nativo (Zero-innerHTML).
+  * @param {Array<Object>} categories - Lista de categorías { id, name }.
+  */
+ function renderCategorySelect(categories)
+ {
+     const select = document.getElementById('category');
+     if (!select)
+     {
+         return;
+     }
+
+     select.replaceChildren();
+
+     categories.forEach(cat =>
+     {
+         const option = document.createElement('option');
+         option.value = cat.id;
+         option.textContent = cat.name;
+         select.appendChild(option);
+     });
+ }
 
  async function loadBooks() 
  {
@@ -123,7 +167,7 @@
         const formData = new FormData();
         formData.append('title', document.getElementById('title').value);
         formData.append('author', document.getElementById('author').value);
-        formData.append('category', document.getElementById('category').value);
+        formData.append('category_id', document.getElementById('category').value);
         formData.append('pages', document.getElementById('pages').value);
         
         // files[0] accede al binario crudo del archivo seleccionado en el input de tipo file
