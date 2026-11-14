@@ -235,6 +235,34 @@ BEGIN
     DELETE FROM books WHERE id = p_id AND user_id = p_user_id;
 END //
 
+/*
+ * @brief Actualiza los metadatos de un libro validando propiedad del usuario.
+ * @details Exige coincidencia de id y user_id para evitar modificaciones no autorizadas (IDOR)
+ * y actualiza la clave foránea category_id correspondiente a la tabla categories.
+ * @param p_book_id Identificador del libro a modificar.
+ * @param p_user_id Identificador del usuario autenticado.
+ * @param p_title Nuevo título del documento.
+ * @param p_author Nuevo autor del documento.
+ * @param p_pages Nueva cantidad de páginas.
+ * @param p_category_id Clave foránea de la categoría seleccionada.
+ */
+CREATE PROCEDURE sp_update_book_metadata(
+    IN p_book_id INT,
+    IN p_user_id INT,
+    IN p_title VARCHAR(100),
+    IN p_author VARCHAR(100),
+    IN p_pages INT,
+    IN p_category_id INT
+)
+BEGIN
+    UPDATE books
+    SET title = p_title,
+        author = p_author,
+        pages = p_pages,
+        category_id = p_category_id
+    WHERE id = p_book_id AND user_id = p_user_id;
+END //
+
 -- --- PROCEDIMIENTOS PARA CATEGORIES ---
 
 /*
@@ -248,3 +276,48 @@ END //
 
 DELIMITER ;
 SET foreign_key_checks = 1;
+
+
+-- MÓDULO DE TRAZABILIDAD Y AUDITORÍA (ACCOUNTING) 
+
+/**
+ * @brief Tabla de registros de auditoría para análisis forense del sistema.
+ * @details Persiste las acciones críticas ejecutadas por clientes y administradores
+ *          evitando depender únicamente de trazas volátiles en consola.
+ */
+CREATE TABLE IF NOT EXISTS audit_logs
+(
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NULL,
+    action VARCHAR(100) NOT NULL,
+    target VARCHAR(255) NOT NULL,
+    ip_address VARCHAR(45) NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_audit_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+DELIMITER //
+
+/**
+ * @brief Procedimiento almacenado para insertar un nuevo evento de auditoría.
+ * @details Encapsula la inserción bajo el Principio de Menor Privilegio (PoLP)
+ *          y previene inyecciones SQL mediante parámetros tipados.
+ * @param p_user_id Identificador del usuario que ejecuta la acción.
+ * @param p_action Código de la acción realizada (ej. 'DELETE_BOOK', 'DELETE_USER').
+ * @param p_target Identificador o descripción del recurso afectado.
+ * @param p_ip_address Dirección IP desde donde se originó la petición.
+ */
+DROP PROCEDURE IF EXISTS sp_create_audit_log //
+CREATE PROCEDURE sp_create_audit_log
+(
+    IN p_user_id INT,
+    IN p_action VARCHAR(100),
+    IN p_target VARCHAR(255),
+    IN p_ip_address VARCHAR(45)
+)
+BEGIN
+    INSERT INTO audit_logs (user_id, action, target, ip_address)
+    VALUES (p_user_id, p_action, p_target, p_ip_address);
+END //
+
+DELIMITER ;

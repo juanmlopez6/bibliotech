@@ -135,3 +135,195 @@
      document.getElementById('pdfIframe').src = pdfUrl;
      modal.style.display = 'block';
  }
+ /**
+ * @brief Muestra una ventana modal para editar los metadatos de un documento.
+ * @details Manipulación estricta del DOM mediante document.createElement() y textContent (Zero innerHTML).
+ * @param {Object} book Objeto con los datos actuales del libro (id, title, author, pages, category_id).
+ * @param {Function} onSaveCallback Función callback que se ejecuta al enviar el formulario con los nuevos datos.
+ * @param {Array<Object>} categories Lista de categorías disponibles { id, name } para poblar el selector.
+ */
+function showEditMetadataModal(book, onSaveCallback, categories = []) 
+{
+    let modal = document.getElementById('editMetadataModal');
+
+    // Helper para poblar las opciones del selector de categorías sin usar innerHTML
+    function populateCategoryOptions(selectElem, selectedCategoryId)
+    {
+        selectElem.replaceChildren();
+        categories.forEach(cat =>
+        {
+            const option = document.createElement('option');
+            option.value = cat.id;
+            option.textContent = cat.name;
+            selectElem.appendChild(option);
+        });
+        if (selectedCategoryId)
+        {
+            selectElem.value = selectedCategoryId;
+        }
+    }
+
+    // Patrón Singleton aplicado al DOM: Solo creamos los elementos si no existen previamente
+    if (!modal) 
+    {
+        modal = document.createElement('div');
+        modal.id = 'editMetadataModal';
+        modal.className = 'w3-modal';
+        modal.style.zIndex = '9999';
+
+        const content = document.createElement('div');
+        content.className = 'w3-modal-content w3-card-4 w3-animate-zoom vault-card';
+        content.style.maxWidth = '450px';
+
+        const header = document.createElement('header');
+        header.className = 'w3-container w3-border-bottom w3-padding w3-display-container';
+
+        const titleElem = document.createElement('h3');
+        titleElem.id = 'editModalTitle';
+        titleElem.className = 'w3-margin-0 w3-text-teal';
+        titleElem.textContent = 'Editar Metadatos del Libro';
+        header.appendChild(titleElem);
+
+        // Botón de cerrar (Cruz superior derecha)
+        const btnCloseHeader = document.createElement('span');
+        btnCloseHeader.className = 'w3-button w3-display-topright w3-hover-red';
+        btnCloseHeader.textContent = '×';
+        btnCloseHeader.style.fontSize = '24px';
+        btnCloseHeader.addEventListener('click', () => 
+        {
+            modal.style.display = 'none';
+        });
+        header.appendChild(btnCloseHeader);
+
+        const bodyDiv = document.createElement('div');
+        bodyDiv.className = 'w3-container w3-padding';
+
+        // Formulario de edición
+        const form = document.createElement('form');
+        form.id = 'editMetadataForm';
+
+        // Helper para crear campos de texto estructurados de forma segura
+        function createField(labelText, inputId, inputType, value) 
+        {
+            const wrapper = document.createElement('div');
+            wrapper.className = 'w3-margin-bottom';
+
+            const label = document.createElement('label');
+            label.className = 'w3-text-dark-gray';
+            label.textContent = labelText;
+
+            const input = document.createElement('input');
+            input.type = inputType;
+            input.id = inputId;
+            input.className = 'w3-input w3-border w3-round';
+            input.value = value || '';
+            input.required = true;
+
+            wrapper.appendChild(label);
+            wrapper.appendChild(input);
+            return wrapper;
+        }
+
+        const inputTitle = createField('Título:', 'editTitle', 'text', book.title);
+        const inputAuthor = createField('Autor:', 'editAuthor', 'text', book.author);
+        const inputPages = createField('Páginas:', 'editPages', 'number', book.pages);
+
+        // Selector dinámico de Categoría (vinculado a la clave foránea category_id)
+        const categoryWrapper = document.createElement('div');
+        categoryWrapper.className = 'w3-margin-bottom';
+
+        const categoryLabel = document.createElement('label');
+        categoryLabel.className = 'w3-text-dark-gray';
+        categoryLabel.textContent = 'Categoría:';
+
+        const selectCategory = document.createElement('select');
+        selectCategory.id = 'editCategory';
+        selectCategory.className = 'w3-select w3-border w3-round';
+        selectCategory.required = true;
+        populateCategoryOptions(selectCategory, book.category_id);
+
+        categoryWrapper.appendChild(categoryLabel);
+        categoryWrapper.appendChild(selectCategory);
+
+        // Contenedor de botones de acción
+        const btnContainer = document.createElement('div');
+        btnContainer.className = 'w3-section w3-right-align';
+
+        const btnCancel = document.createElement('button');
+        btnCancel.type = 'button';
+        btnCancel.className = 'w3-button w3-light-grey w3-margin-right w3-round';
+        btnCancel.textContent = 'Cancelar';
+        btnCancel.addEventListener('click', () => 
+        {
+            modal.style.display = 'none';
+        });
+
+        const btnSubmit = document.createElement('button');
+        btnSubmit.type = 'submit';
+        btnSubmit.className = 'w3-button w3-teal w3-round';
+        btnSubmit.textContent = 'Guardar Cambios';
+
+        btnContainer.appendChild(btnCancel);
+        btnContainer.appendChild(btnSubmit);
+
+        form.appendChild(inputTitle);
+        form.appendChild(inputAuthor);
+        form.appendChild(inputPages);
+        form.appendChild(categoryWrapper);
+        form.appendChild(btnContainer);
+
+        // Manejo del evento Submit del formulario
+        form.addEventListener('submit', (e) => 
+        {
+            e.preventDefault();
+            const updatedData = {
+                title: document.getElementById('editTitle').value,
+                author: document.getElementById('editAuthor').value,
+                pages: parseInt(document.getElementById('editPages').value, 10),
+                category_id: parseInt(document.getElementById('editCategory').value, 10)
+            };
+            onSaveCallback(book.id, updatedData, modal);
+        });
+
+        bodyDiv.appendChild(form);
+        content.appendChild(header);
+        content.appendChild(bodyDiv);
+        modal.appendChild(content);
+        document.body.appendChild(modal);
+    } 
+    else 
+    {
+        // Si el modal ya existe en el DOM, actualizamos los valores de los inputs con el libro seleccionado
+        document.getElementById('editTitle').value = book.title || '';
+        document.getElementById('editAuthor').value = book.author || '';
+        document.getElementById('editPages').value = book.pages || '';
+        
+        // Reasignamos el evento submit para que apunte al libro actual
+        const form = document.getElementById('editMetadataForm');
+        // Clonar y reemplazar el formulario limpia los listeners viejos de forma segura
+        const newForm = form.cloneNode(true);
+        form.parentNode.replaceChild(newForm, form);
+
+        populateCategoryOptions(document.getElementById('editCategory'), book.category_id);
+
+        newForm.addEventListener('submit', (e) => 
+        {
+            e.preventDefault();
+            const updatedData = {
+                title: document.getElementById('editTitle').value,
+                author: document.getElementById('editAuthor').value,
+                pages: parseInt(document.getElementById('editPages').value, 10),
+                category_id: parseInt(document.getElementById('editCategory').value, 10)
+            };
+            onSaveCallback(book.id, updatedData, modal);
+        });
+
+        // Reasignar evento al botón cancelar dentro del modal existente
+        newForm.querySelectorAll('button')[0].addEventListener('click', () => 
+        {
+            modal.style.display = 'none';
+        });
+    }
+
+    modal.style.display = 'block';
+}
